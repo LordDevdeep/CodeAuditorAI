@@ -1,68 +1,102 @@
-# IBM Hackathon GitHub Project Template
+# CodeAuditor AI
 
-This GitHub project template is for IBM Hackathon projects. It includes pre-configured security files to help prevent accidental credential commits and potential account suspension during the hackathon.
+> Audit AI-generated code changes for risk before you commit them.
 
-## 🚀 Quick Start
-
-1. **Use this template to create your project:**
-   - Click "Use this template" button above and select "Create a new repository"
-   - Name your repository
-   - Click "Create repository"
-
-2. **Clone your new repository:**
-
-   ```bash
-   git clone https://github.com/HACKATHON-ORG/your-repo-name.git
-   cd your-repo-name
-   ```
-
-3. **Set up environment variables:**
-
-   ```bash
-   # Copy the example file
-   cp .env.example .env
-
-   # Edit .env with your actual credentials
-   # Use your preferred editor (nano, vim, code, etc.)
-   nano .env
-   ```
-
-4. **Verify .gitignore is working:**
-
-   ```bash
-   # This should NOT show .env file
-   git status
-
-   # This should confirm .env is ignored
-   git check-ignore -v .env
-   ```
-
-5. **Start developing!**
-
-## 🔒 Security Features
-
-This template includes:
-
-- **`.gitignore`** - Prevents committing credentials and live session files
-- **`.bobignore`** - Prevents AI assistants from logging credentials
-- **`.env.example`** - Template for your environment variables
-
-## 📋 Before Every Commit
-
-Always run this checklist:
-
-- [ ] Reviewed `git diff` for sensitive data
-- [ ] No hardcoded API keys or passwords
-- [ ] `.env` file is NOT in staged changes
-- [ ] No files with "credential" or "secret" in name
-- [ ] Used environment variables for all credentials
-
-## 🆘 Need Help?
-
-- Read [SECURITY.md](SECURITY.MD) for detailed guidelines
-- Contact hackathon support through mentor channel
-- Ask in the hackathon Slack workspace
+CodeAuditor AI is a hackathon project that sits between your AI coding assistant and your Git commit. It analyses a proposed diff and surfaces three categories of risk so developers can make an informed decision before merging.
 
 ---
 
-**Remember:** Security is everyone's responsibility. When in doubt, ask for help!
+## 🔍 What it does
+
+| Agent | Responsibility |
+|---|---|
+| **Requirement Agent** | Checks whether the change actually fulfils the stated requirement or ticket description |
+| **Security Agent** | Scans for common vulnerabilities — hardcoded secrets, injection risks, insecure defaults |
+| **Impact Agent** | Identifies blast radius — which files, functions, or services are affected |
+| **Coordinator** | Aggregates the three agent reports into a single risk score and summary |
+
+---
+
+## 🗂️ Project structure
+
+```
+CodeAuditorAI/
+├── backend/
+│   ├── app.py                  # Flask entry point
+│   ├── requirements.txt        # Python dependencies
+│   ├── coordinator/            # Aggregates agent results → final report
+│   ├── requirement_agent/      # Requirement-coverage analysis
+│   ├── security_agent/         # Security vulnerability scan
+│   └── impact_agent/           # Change impact analysis
+├── frontend/                   # (UI — TBD)
+├── sample_code/                # Example diffs for demo / testing
+└── bob_sessions/               # Saved Bob AI session logs
+```
+
+---
+
+## 🚀 Quick start
+
+### Prerequisites
+- Python 3.10+
+- pip
+
+### Run the backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+python app.py
+```
+
+The API will be available at `http://localhost:5000`.
+
+### API endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `POST` | `/audit` | Submit a diff for full audit |
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost:5000/audit \
+  -H "Content-Type: application/json" \
+  -d '{"diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n+import os\n+password = \"hunter2\"", "requirement": "Add env-var support"}'
+```
+
+**Example response:**
+
+```json
+{
+  "risk_score": 8,
+  "summary": "Hardcoded password detected. Requirement partially met.",
+  "agents": {
+    "requirement": { "met": false, "notes": "Requirement calls for env-var; change uses a literal." },
+    "security":   { "issues": ["Hardcoded credential on line 2"] },
+    "impact":     { "files_changed": ["app.py"], "risk": "low" }
+  }
+}
+```
+
+---
+
+## 🔒 Security reminder
+
+- Never commit `.env` or credentials — see [SECURITY.MD](SECURITY.MD)
+- All API keys must go in a `.env` file (already git-ignored)
+
+---
+
+## 🛠️ Tech stack
+
+- **Backend:** Python, Flask
+- **AI / LLM:** IBM watsonx (planned)
+- **Frontend:** TBD (plain HTML or React)
+
+---
+
+## 👥 Team
+
+Built for the IBM Hackathon.
