@@ -15,24 +15,35 @@ CORS(app)
 
 
 @app.route("/health", methods=["GET"])
+@app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
 
 
 @app.route("/audit", methods=["POST"])
+@app.route("/api/audit", methods=["POST"])
 def audit():
     body = request.get_json(force=True)
 
-    # Accept both "code"/"task" (frontend) and "diff"/"requirement" (API/CLI)
     diff = (body.get("code") or body.get("diff") or "").strip()
     requirement = (body.get("task") or body.get("requirement") or "").strip()
 
     if not diff:
-        return jsonify({"error": "Missing required field: code (or diff)"}), 400
+        return jsonify({
+            "error": "Missing required field: code (or diff)"
+        }), 400
 
-    result = run_audit(diff=diff, requirement=requirement)
+    result = run_audit(
+        diff=diff,
+        requirement=requirement
+    )
+
     return jsonify(result)
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=True
+    )
