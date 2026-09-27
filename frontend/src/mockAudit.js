@@ -15,7 +15,7 @@
  */
 
 export async function runAudit(task, code, language) {
-  const response = await fetch('/audit', {
+    const response = await fetch('/api/audit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ task, code, language }),
