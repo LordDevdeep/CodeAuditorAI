@@ -1,0 +1,1 @@
+Implement a login function that accepts a username and email address, validates that the email is correctly formatted, and returns a success or failure response based on whether the credentials match a stored user record.
