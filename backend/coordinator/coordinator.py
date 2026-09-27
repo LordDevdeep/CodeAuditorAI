@@ -1,9 +1,23 @@
 """
 Coordinator — calls all agents and aggregates their results into a
-single risk report.
+single risk report shaped to match the frontend AuditResults component.
 
-Each agent is normalised to {"status": "pass"|"fail"|"risky", "message": str}
-before being combined into the final report.
+Frontend expects:
+{
+    trustScore:        number (0-100),
+    status:            "SAFE" | "CAUTION" | "RISKY",
+    requirementMatch:  number (0-100),
+    security:          number (0-100),
+    impact:            "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+    summary:           string,
+    findings: [{
+        severity:    "HIGH" | "MEDIUM" | "LOW",
+        title:       string,
+        description: string,
+        line:        number | null,
+    }],
+    recommendations: string[],
+}
 """
 
 from requirement_agent.agent import analyse as requirement_analyse
@@ -12,66 +26,72 @@ from impact_agent.agent import analyse as impact_analyse
 
 
 # ---------------------------------------------------------------------------
-# Normalisation helpers
-# Each function converts an agent's native output to the canonical schema.
+# Helpers
 # ---------------------------------------------------------------------------
 
-def _normalise_requirement(result: dict) -> dict:
-    """Requirement agent returns {"met": bool, "notes": str}."""
-    if result.get("met", True):
-        return {"status": "pass", "message": result.get("notes", "Requirement met.")}
-    return {"status": "fail", "message": result.get("notes", "Requirement not met.")}
+def _overall_status(req_verdict: str, sec_verdict: str) -> str:
+    """Map agent verdicts to a single SAFE / CAUTION / RISKY status."""
+    verdicts = {req_verdict, sec_verdict}
+    if "RISKY" in verdicts or "FAIL" in verdicts:
+        return "RISKY"
+    if "CAUTION" in verdicts:
+        return "CAUTION"
+    return "SAFE"
 
 
-def _normalise_security(result: dict) -> dict:
-    """Security agent returns {"issues": list, "notes": str}."""
-    issues = result.get("issues", [])
-    if not issues:
-        return {"status": "pass", "message": result.get("notes", "No issues found.")}
-    return {
-        "status": "fail",
-        "message": result.get("notes", f"{len(issues)} issue(s) found."),
-    }
+def _impact_label(risk: str) -> str:
+    """Translate legacy diff-based risk string to frontend label."""
+    mapping = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH"}
+    return mapping.get(risk.lower(), "MEDIUM")
 
 
-def _normalise_impact(result: dict) -> dict:
-    """Impact agent returns {"risk": "low"|"medium"|"high", "notes": str}."""
-    risk = result.get("risk", "low")
-    message = result.get("notes", f"Impact risk: {risk}.")
-    if risk == "high":
-        return {"status": "fail", "message": message}
-    if risk == "medium":
-        return {"status": "risky", "message": message}
-    return {"status": "pass", "message": message}
+def _trust_score(req_score: int, sec_score: int) -> int:
+    """Average the two meaningful scores (requirement + security)."""
+    return round((req_score + sec_score) / 2)
 
 
-# ---------------------------------------------------------------------------
-# Verdict and trust-score logic
-# ---------------------------------------------------------------------------
+def _collect_findings(sec_result: dict, req_result: dict) -> list[dict]:
+    """Build a unified findings list from both agents."""
+    findings = []
 
-def _compute_verdict_and_score(agents: dict) -> tuple[str, int]:
-    """
-    Rules:
-    - trust_score starts at 10; subtract 2 for every agent that doesn't pass.
-    - overall verdict:
-        "Safe"           — all three pass
-        "Review Needed"  — exactly one flags an issue (fail or risky)
-        "Risky"          — two or more flag an issue
-    """
-    non_passing = sum(
-        1 for a in agents.values() if a["status"] != "pass"
-    )
+    # Security findings — already have the right shape
+    for f in sec_result.get("findings", []):
+        findings.append({
+            "severity": f["severity"],
+            "title": f["title"],
+            "description": f["description"],
+            "line": f.get("line_number"),
+        })
 
-    trust_score = max(10 - non_passing * 2, 0)
+    # Requirement findings — text strings, rendered as LOW findings
+    for text in req_result.get("findings", []):
+        findings.append({
+            "severity": "LOW",
+            "title": "Requirement gap",
+            "description": text,
+            "line": None,
+        })
 
-    if non_passing == 0:
-        verdict = "Safe"
-    elif non_passing == 1:
-        verdict = "Review Needed"
-    else:
-        verdict = "Risky"
+    return findings
 
-    return verdict, trust_score
+
+def _collect_recommendations(sec_result: dict, req_result: dict) -> list[str]:
+    """Gather unique recommendations from both agents."""
+    seen: set[str] = set()
+    recs = []
+
+    for f in sec_result.get("findings", []):
+        rec = f.get("recommendation", "")
+        if rec and rec not in seen:
+            seen.add(rec)
+            recs.append(rec)
+
+    for miss in req_result.get("missing_requirements", []):
+        if miss not in seen:
+            seen.add(miss)
+            recs.append(miss)
+
+    return recs
 
 
 # ---------------------------------------------------------------------------
@@ -79,20 +99,40 @@ def _compute_verdict_and_score(agents: dict) -> tuple[str, int]:
 # ---------------------------------------------------------------------------
 
 def run_audit(diff: str, requirement: str) -> dict:
-    req_result = _normalise_requirement(requirement_analyse(diff=diff, requirement=requirement))
-    sec_result = _normalise_security(security_analyse(diff=diff))
-    imp_result = _normalise_impact(impact_analyse(diff=diff))
+    req_result = requirement_analyse(diff=diff, requirement=requirement)
+    sec_result = security_analyse(diff=diff)
+    imp_result = impact_analyse(diff=diff)
 
-    agents = {
-        "requirement": req_result,
-        "security": sec_result,
-        "impact": imp_result,
-    }
+    req_score = req_result.get("score", 100)
+    sec_score = sec_result.get("score", 100)
 
-    verdict, trust_score = _compute_verdict_and_score(agents)
+    req_verdict = req_result.get("verdict", "PASS")
+    sec_verdict = sec_result.get("verdict", "PASS")
+
+    status = _overall_status(req_verdict, sec_verdict)
+    trust = _trust_score(req_score, sec_score)
+
+    impact_risk = imp_result.get("risk", "low")
+    impact = _impact_label(impact_risk)
+
+    findings = _collect_findings(sec_result, req_result)
+    recommendations = _collect_recommendations(sec_result, req_result)
+
+    # Build a human-readable summary
+    sec_summary = sec_result.get("summary", "")
+    req_summary = req_result.get("summary", "")
+    if sec_summary and req_summary:
+        summary = f"{req_summary} {sec_summary}"
+    else:
+        summary = sec_summary or req_summary or "Audit complete."
 
     return {
-        "verdict": verdict,
-        "trust_score": trust_score,
-        "agents": agents,
+        "trustScore":       trust,
+        "status":           status,
+        "requirementMatch": req_score,
+        "security":         sec_score,
+        "impact":           impact,
+        "summary":          summary,
+        "findings":         findings,
+        "recommendations":  recommendations,
     }
